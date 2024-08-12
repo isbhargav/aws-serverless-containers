@@ -1,0 +1,87 @@
+Transform: AWS::Serverless-2016-10-31
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Sample SAM Template for StepFunction ECS Integration (uksb-1tthgi812) (tag:sfn-ecs-sam)
+
+Resources:
+    
+  # IAM Role for API Gateway + CloudWatch Logging
+  CloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          Action: 'sts:AssumeRole'
+          Effect: Allow
+          Principal:
+            Service: apigateway.amazonaws.com
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs'
+
+  # Grant API Gateway access to write to logs
+  ApiCWLRoleArn:
+    Type: AWS::ApiGateway::Account
+    Properties: 
+      CloudWatchRoleArn: !GetAtt CloudWatchRole.Arn
+
+  # CloudWatch Log group
+  AccessLogGroup:
+    Type: AWS::Logs::LogGroup
+
+  GreetAPI:
+    Type: AWS::Serverless::Api
+    DependsOn: ApiCWLRoleArn
+    Properties:
+      AccessLogSetting:
+        DestinationArn: !GetAtt AccessLogGroup.Arn
+        Format: '{ "requestId": "$context.requestId", "path": "$context.path", "routeKey": "$context.routeKey", "ip": "$context.identity.sourceIp", "requestTime": "$context.requestTime", "httpMethod": "$context.httpMethod","statusCode": $context.status }'
+
+      Name: Hello World API
+      StageName: Prod
+      TracingEnabled: true
+
+  GreetFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      PackageType: Image
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: AllAtOnce # Or Canary10Percent5Minutes, Linear10PercentEvery1Minute, ...
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ENVIRONMENT: test
+      Events:
+        Greet:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            RestApiId: !Ref GreetAPI
+            Path: /
+            Method: ANY
+    Metadata:
+      DockerContext: .
+      Dockerfile: ./Dockerfile
+      DockerTag: v1
+
+
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      PackageType: Image
+      ImageConfig:
+        Command: ["handler.lambdaHandler"]
+
+    Metadata:
+      DockerContext: .
+      Dockerfile: ./DockerfileAsync
+      DockerTag: v1
+
+Outputs:
+  GreetAPI:
+    Description: "API Gateway endpoint URL for Prod stage for GreetFunction function"
+    Value: !Sub "https://${GreetAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  GreetFunction:
+    Description: "API Request Lambda Function ARN"
+    Value: !GetAtt GreetFunction.Arn
